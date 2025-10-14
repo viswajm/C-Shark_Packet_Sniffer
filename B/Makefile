@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -I..
-LDFLAGS=-lpcap
+LDFLAGS=-lpcap -pthread
 
 all: cshark
 
