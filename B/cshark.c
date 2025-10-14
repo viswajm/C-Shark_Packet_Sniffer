@@ -4,6 +4,8 @@ pcap_if_t *alldevices, *device;
 char errbuf[PCAP_ERRBUF_SIZE];
 static int packet_id = 1;
 pcap_t *handle;
+packet_store packets[MAX_PACKETS];
+int packet_count = 0;
 
 // LLM Generated Code Begins
 volatile sig_atomic_t stop_sniffing = 0;
@@ -404,7 +406,49 @@ void print_payload(const unsigned char *payload, int payload_len)
     printf("-----------------------------------------\n\n");
 }
 
-// ================= Packet Handler =================
+void print_summariser()
+{
+    printf("\n================ Packet Summary ================\n");
+    printf("Total Packets Captured: %d\n", packet_count);
+    for (int i = 0; i < packet_count; i++)
+    {
+        const struct pcap_pkthdr *header = &packets[i].header;
+        const unsigned char *packet = packets[i].data;
+        printf("%d. Length: %u bytes | Timestamp: %ld.%06ld\n", i + 1, header->caplen, header->ts.tv_sec, header->ts.tv_usec);
+        printf("   Src MAC: %02x:%02x:%02x:%02x:%02x:%02x | Dst MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+               packets[i].src_mac[0], packets[i].src_mac[1], packets[i].src_mac[2], packets[i].src_mac[3], packets[i].src_mac[4], packets[i].src_mac[5],
+               packets[i].dst_mac[0], packets[i].dst_mac[1], packets[i].dst_mac[2], packets[i].dst_mac[3], packets[i].dst_mac[4], packets[i].dst_mac[5]);
+        printf("Src port->Dst port: %u->%u | ", packets[i].src_port, packets[i].dst_port);
+    }
+    printf("===============================================\n");
+}
+
+void hex_dump(const unsigned char *data, int len)
+{
+    printf("      ");
+    for (int i = 0; i < 16; i++)
+    {
+        printf("%02X ", i);
+    }
+    printf("\n");
+    for (int i = 0; i < len; i++)
+    {
+        if (i % 16 == 0)
+            printf("%04x: ", i);
+        printf("%02X ", data[i]);
+        if ((i + 1) % 16 == 0)
+        {
+            printf(" ");
+            for (int j = i - 15; j <= i; j++)
+            {
+                unsigned char c = data[j];
+                printf("%c", (c >= 32 && c <= 126) ? c : '.');
+            }
+            printf("\n");
+        }
+    }
+    printf("\n");
+}
 
 void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const unsigned char *packet)
 {
@@ -448,10 +492,87 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
     {
         print_arp_layer(packet, caplen, off);
     }
+
+    if (packet_count < MAX_PACKETS)
+    {
+        packet_store *sp = malloc(sizeof(packet_store));
+        if (sp)
+        {
+            sp->header = *header;
+            sp->data = malloc(header->caplen);
+            if (sp->data)
+            {
+                memcpy(sp->data, packet, header->caplen);
+                packets[packet_count++] = *sp;
+            }
+            sp->src_mac[0] = packet[6];
+            sp->src_mac[1] = packet[7];
+            sp->src_mac[2] = packet[8];
+            sp->src_mac[3] = packet[9];
+            sp->src_mac[4] = packet[10];
+            sp->src_mac[5] = packet[11];
+            sp->dst_mac[0] = packet[0];
+            sp->dst_mac[1] = packet[1];
+            sp->dst_mac[2] = packet[2];
+            sp->dst_mac[3] = packet[3];
+            sp->dst_mac[4] = packet[4];
+            sp->dst_mac[5] = packet[5];
+            sp->timestamp = header->ts;
+            sp->length = header->caplen;
+            if (eth_type == ETHER_TYPE_IPv4)
+            {
+                const struct ipv4_hdr *ip = (const struct ipv4_hdr *)(packet + off);
+                inet_ntop(AF_INET, &ip->src, sp->src_ip, sizeof(sp->src_ip));
+                inet_ntop(AF_INET, &ip->dst, sp->dst_ip, sizeof(sp->dst_ip));
+                sp->protocol = ip->protocol;
+                if (ip->protocol == IPPROTO_TCP)
+                {
+                    const struct tcp_hdr *tcp = (const struct tcp_hdr *)(packet + off + ((ip->ver_ihl & 0x0F) * 4));
+                    sp->src_port = ntohs(tcp->src_port);
+                    sp->dst_port = ntohs(tcp->dst_port);
+                }
+                else if (ip->protocol == IPPROTO_UDP)
+                {
+                    const struct udp_hdr *udp = (const struct udp_hdr *)(packet + off + ((ip->ver_ihl & 0x0F) * 4));
+                    sp->src_port = ntohs(udp->src_port);
+                    sp->dst_port = ntohs(udp->dst_port);
+                }
+            }
+            else if (eth_type == ETHER_TYPE_IPV6)
+            {
+                const struct ipv6_hdr *ip6 = (const struct ipv6_hdr *)(packet + off);
+                inet_ntop(AF_INET6, ip6->src, sp->src_ip, sizeof(sp->src_ip));
+                inet_ntop(AF_INET6, ip6->dst, sp->dst_ip, sizeof(sp->dst_ip));
+                sp->protocol = ip6->next_header;
+                if (ip6->next_header == IPPROTO_TCP)
+                {
+                    const struct tcp_hdr *tcp = (const struct tcp_hdr *)(packet + off + sizeof(struct ipv6_hdr));
+                    sp->src_port = ntohs(tcp->src_port);
+                    sp->dst_port = ntohs(tcp->dst_port);
+                }
+                else if (ip6->next_header == IPPROTO_UDP)
+                {
+                    const struct udp_hdr *udp = (const struct udp_hdr *)(packet + off + sizeof(struct ipv6_hdr));
+                    sp->src_port = ntohs(udp->src_port);
+                    sp->dst_port = ntohs(udp->dst_port);
+                }
+            }
+            else
+            {
+                sp->src_port = 0;
+                sp->dst_port = 0;
+            }
+        }
+        else
+        {
+            free(sp);
+        }
+    }
 }
 
 void sniffer(const char *d)
 {
+    free_captured_packets();
     handle = pcap_open_live(d, 65536, 1, 100, errbuf);
 
     if (handle == NULL)
@@ -470,6 +591,96 @@ void sniffer(const char *d)
         printf("[C-Shark] Ctrl+C pressed. Returning to Main Menu...\n");
         stop_sniffing = 0;
     }
+}
+
+void sniffer_with_filter(const char *d, const char *filter_exp)
+{
+    free_captured_packets();
+    handle = pcap_open_live(d, 65536, 1, 100, errbuf);
+    if (handle == NULL)
+    {
+        fprintf(stderr, "[C-Shark] Couldn't open device %s: %s\n", d, errbuf);
+        return;
+    }
+    // LLM Generated Code Begins
+    struct bpf_program fp;
+    bpf_u_int32 net, mask;
+
+    if (pcap_lookupnet(d, &net, &mask, errbuf) == -1)
+    {
+        fprintf(stderr, "[C-Shark] Couldn't get netmask for device %s: %s\n", d, errbuf);
+        net = 0;
+        mask = 0;
+    }
+
+    if (pcap_compile(handle, &fp, filter_exp, 0, mask) == -1)
+    {
+        fprintf(stderr, "[C-Shark] Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(handle));
+        pcap_close(handle);
+        return;
+    }
+
+    if (pcap_setfilter(handle, &fp) == -1)
+    {
+        fprintf(stderr, "[C-Shark] Couldn't install filter %s: %s\n", filter_exp, pcap_geterr(handle));
+        pcap_freecode(&fp);
+        pcap_close(handle);
+        return;
+    }
+
+    printf("[C-Shark] Filter '%s' applied successfully. Starting filtered sniffing...\n", filter_exp);
+
+    signal(SIGINT, sigint_handler);
+    pcap_loop(handle, 0, packet_handler, NULL);
+
+    pcap_freecode(&fp);
+    pcap_close(handle);
+
+    if (stop_sniffing)
+    {
+        printf("[C-Shark] Ctrl+C pressed. Returning to Main Menu...\n");
+        stop_sniffing = 0;
+    }
+    // LLM Generated Code Ends
+}
+
+void free_captured_packets()
+{
+    for (int i = 0; i < packet_count; i++)
+    {
+        if (packets[i].data)
+        {
+            free(packets[i].data);
+            packets[i].data = NULL;
+        }
+    }
+    packet_count = 0;
+}
+
+void inspect_packet(packet_store *sp)
+{
+    const unsigned char *packet = sp->data;
+    uint32_t caplen = sp->header.caplen;
+
+    printf("\n========== Detailed Inspection ==========\n");
+    printf("Packet Length: %u bytes | Timestamp: %ld.%06ld\n\n", caplen, sp->header.ts.tv_sec, sp->header.ts.tv_usec);
+
+    // Print interpreted layers
+    print_ethernet_layer(packet);
+
+    unsigned short eth_type = (packet[12] << 8) | packet[13];
+    uint32_t off = sizeof(struct eth_hdr);
+
+    if (eth_type == ETHER_TYPE_IPv4)
+        print_ipv4_layer(packet, caplen, off);
+    else if (eth_type == ETHER_TYPE_IPV6)
+        print_ipv6_layer(packet, caplen, off);
+    else if (eth_type == ETHER_TYPE_ARP)
+        print_arp_layer(packet, caplen, off);
+
+    // Full hex dump
+    printf("\nFull Hex Dump:\n");
+    hex_dump(packet, caplen);
 }
 
 int main()
@@ -532,7 +743,7 @@ int main()
     while (1)
     {
 
-        printf("\n1. Start Sniffing all Packets\n2. Start Sniffing (With Filters)\n3. Inspect Last Session\n4. Exit C-Shark\n");
+        printf("\n1. Start Sniffing all Packets 🔍\n2. Start Sniffing (With Filters) 🔍🔍\n3. Inspect Last Session\n4. Exit C-Shark\n");
         printf("[C-Shark] Enter your choice: ");
 
         int mode;
@@ -546,17 +757,105 @@ int main()
             printf("Invalid Choice.\n");
             continue;
         }
-        if (mode == 4)
+        else if (mode == 4)
         {
             printf("[C-Shark] Exiting C-Shark...\nThank You! Bye :)\n");
             pcap_freealldevs(alldevices);
             return 0;
         }
-        if (mode == 1)
+        else if (mode == 1)
         {
             sniffer(d->name);
         }
+        else if (mode == 2)
+        {
+            printf("[C-Shark] Welcome to Filtered Sniffing Mode!\n");
+            int filter_choice = 0;
+
+            while (filter_choice < 1 || filter_choice > 6)
+            {
+                printf("1. HTTP\n2. HTTPS\n3. DNS\n4. ARP\n5. TCP\n6. UDP\n");
+                printf("[C-Shark] Select the filter for precision hunting:\n");
+
+                if (scanf("%d", &filter_choice) != 1)
+                {
+                    printf("\n[C-Shark] Ctrl+D detected - Exiting C-Shark...\nThank You! Bye :)\n");
+                    break;
+                }
+
+                if (filter_choice < 1 || filter_choice > 6)
+                {
+                    printf("Invalid filter choice. Please select again.\n");
+                }
+            }
+
+            char filter_exp[50];
+            switch (filter_choice)
+            {
+            case 1:
+                strcpy(filter_exp, "tcp port 80");
+                break;
+            case 2:
+                strcpy(filter_exp, "tcp port 443");
+                break;
+            case 3:
+                strcpy(filter_exp, "udp port 53");
+                break;
+            case 4:
+                strcpy(filter_exp, "arp");
+                break;
+            case 5:
+                strcpy(filter_exp, "tcp");
+                break;
+            case 6:
+                strcpy(filter_exp, "udp");
+                break;
+            default:
+                strcpy(filter_exp, "ip");
+                break;
+            }
+
+            sniffer_with_filter(d->name, filter_exp);
+        }
+        else if (mode == 3)
+        {
+            if (packet_count == 0)
+            {
+                printf("[C-Shark] No packets captured yet. Start a sniffing session first.\n");
+                continue;
+            }
+            printf("[C-Shark] Inspecting last session 🔍...\n%d packets captured.\n", packet_count);
+            print_summariser();
+            printf("\n[C-Shark] Enter packet number (1-%d) to inspect in detail or 0 to return to main menu: ", packet_count);
+            int pkt_num;
+            if (scanf("%d", &pkt_num) != 1)
+            {
+                printf("\n[C-Shark] Ctrl+D detected - Exiting C-Shark...\n");
+                break;
+            }
+            if (pkt_num == 0)
+            {
+                continue;
+            }
+            while (pkt_num < 1 || pkt_num > packet_count)
+            {
+                printf("Invalid packet number. Please enter a number between 1 and %d or 0 to return: ", packet_count);
+                if (scanf("%d", &pkt_num) != 1)
+                {
+                    printf("\n[C-Shark] Ctrl+D detected - Exiting C-Shark...\n");
+                    break;
+                }
+                if (pkt_num == 0)
+                {
+                    break;
+                }
+            }
+            inspect_packet(&packets[pkt_num - 1]);
+        }
     }
     pcap_freealldevs(alldevices);
+
+    free_captured_packets();
+
     return 0;
 }

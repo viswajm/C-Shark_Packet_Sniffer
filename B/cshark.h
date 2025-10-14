@@ -28,6 +28,23 @@
 #define ETHER_TYPE_IPV6 0x86DD
 #define ETHER_TYPE_ARP 0x0806
 
+#define MAX_PACKETS 10000
+
+typedef struct
+{
+    struct pcap_pkthdr header;
+    const unsigned char *data;
+    struct timeval timestamp;
+    int length;
+    uint8_t src_mac[6];
+    uint8_t dst_mac[6];
+    char src_ip[INET6_ADDRSTRLEN];
+    char dst_ip[INET6_ADDRSTRLEN];
+    uint16_t src_port;
+    uint16_t dst_port;
+    uint8_t protocol; // TCP, UDP, ICMP, etc.
+} packet_store;
+
 // LLM Generated Code Begins
 //  Ethernet header (14 bytes)
 struct eth_hdr
@@ -137,7 +154,11 @@ void print_tcp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
 void print_udp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off);
 void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const unsigned char *packet);
 void print_payload(const unsigned char *payload, int payload_len);
+void hex_dump(const unsigned char *data, int len);
+void inspect_packet(packet_store *sp);
 void sniffer(const char *d);
+void sniffer_with_filter(const char *d, const char *filter_exp);
 void sigint_handler(int signo);
+void free_captured_packets();
 
 #endif
