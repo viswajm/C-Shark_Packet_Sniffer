@@ -67,8 +67,10 @@ void print_ipv4_layer(const unsigned char *packet, uint32_t caplen, uint32_t off
     uint8_t flags = (frag_field & 0xE000) >> 13;
     uint16_t frag_offset = frag_field & 0x1FFF;
 
+    // LLM Generated Code Begins
     uint8_t df_flag = (flags & 0x2) >> 1;
     uint8_t mf_flag = (flags & 0x1);
+    // LLM Generated Code Ends
 
     if (version != 4)
     {
@@ -209,7 +211,7 @@ void print_arp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
         printf("Truncated ARP\n");
         return;
     }
-
+    // LLM Generated Code Begins
     const struct ether_arp *arp = (const struct ether_arp *)(packet + off);
     printf("Operation: ");
     uint16_t oper = ntohs(arp->arp_op);
@@ -232,6 +234,7 @@ void print_arp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
     printf("HW Type: %u | Protocol Type: 0x%04x | HW Length: %u | Protocol Length: %u\n",
            ntohs(arp->arp_hrd), ntohs(arp->arp_pro), arp->arp_hln, arp->arp_pln);
     printf("\n");
+    // LLM Generated Code Ends
 }
 
 void print_tcp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
@@ -379,6 +382,7 @@ void print_payload(const unsigned char *payload, int payload_len)
     printf("Data (first %d bytes):\n", payload_len > 64 ? 64 : payload_len);
 
     int line_len = 16;
+    // LLM Generated Code Begins
     for (int i = 0; i < payload_len && i < 64; i += line_len)
     {
         int j;
@@ -398,34 +402,36 @@ void print_payload(const unsigned char *payload, int payload_len)
         }
         printf("\n");
     }
+    // LLM Generated Code Ends
     printf("-----------------------------------------\n\n");
 }
 
 void print_summariser()
 {
+    // LLM Generated Code Begins
     printf("\n");
     printf("╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗\n");
     printf("║                                                    PACKET SUMMARY - Total Packets: %-4d                                                       ║\n", packet_count);
     printf("╠═════╦════════════╦═══════════════════════╦═══════════════════════╦════════════════════════════════════╦════════════════════════════════════╦═══════════╣\n");
     printf("║ No. ║   Length   ║      Timestamp        ║      Src MAC          ║            Src IP                  ║            Dst IP                  ║   Ports   ║\n");
     printf("╠═════╬════════════╬═══════════════════════╬═══════════════════════╬════════════════════════════════════╬════════════════════════════════════╬═══════════╣\n");
-    
+
     for (int i = 0; i < packet_count; i++)
     {
         const struct pcap_pkthdr *header = &packets[i].header;
-        
+
         // Format MAC address
         char src_mac_str[18];
         snprintf(src_mac_str, sizeof(src_mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
                  packets[i].src_mac[0], packets[i].src_mac[1], packets[i].src_mac[2],
                  packets[i].src_mac[3], packets[i].src_mac[4], packets[i].src_mac[5]);
-        
+
         // Format timestamp
         char timestamp_str[22];
         snprintf(timestamp_str, sizeof(timestamp_str), "%ld.%06ld", header->ts.tv_sec, header->ts.tv_usec);
-        
+
         // Format ports
-        char ports_str[16];  // Increased size to avoid truncation warning
+        char ports_str[16]; // Increased size to avoid truncation warning
         if (packets[i].src_port != 0 || packets[i].dst_port != 0)
         {
             snprintf(ports_str, sizeof(ports_str), "%u->%u", packets[i].src_port, packets[i].dst_port);
@@ -434,11 +440,11 @@ void print_summariser()
         {
             snprintf(ports_str, sizeof(ports_str), "N/A");
         }
-        
+
         // Format IP addresses (handle empty strings)
         const char *src_ip_display = (packets[i].src_ip[0] != '\0') ? packets[i].src_ip : "N/A";
         const char *dst_ip_display = (packets[i].dst_ip[0] != '\0') ? packets[i].dst_ip : "N/A";
-        
+
         printf("║ %-3d ║ %-8u B ║ %-21s ║ %-21s ║ %-34s ║ %-34s ║ %-9s ║\n",
                i + 1,
                header->caplen,
@@ -448,9 +454,10 @@ void print_summariser()
                dst_ip_display,
                ports_str);
     }
-    
+
     printf("╚═════╩════════════╩═══════════════════════╩═══════════════════════╩════════════════════════════════════╩════════════════════════════════════╩═══════════╝\n");
     printf("\n");
+    // LLM Generated Code Ends
 }
 
 void hex_dump(const unsigned char *data, int len)
@@ -522,7 +529,7 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
     {
         print_arp_layer(packet, caplen, off);
     }
-
+    // LLM Generated Code Begins
     if (packet_count < MAX_PACKETS)
     {
         packet_store *sp = malloc(sizeof(packet_store));
@@ -548,14 +555,14 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
             sp->dst_mac[5] = packet[5];
             sp->timestamp = header->ts;
             sp->length = header->caplen;
-            
+
             // Initialize IP addresses to empty strings
             sp->src_ip[0] = '\0';
             sp->dst_ip[0] = '\0';
             sp->protocol = 0;
             sp->src_port = 0;
             sp->dst_port = 0;
-            
+
             if (eth_type == ETHER_TYPE_IPv4)
             {
                 const struct iphdr *ip = (const struct iphdr *)(packet + off);
@@ -594,12 +601,13 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
                     sp->dst_port = ntohs(udp->dest);
                 }
             }
-            
+
             // Copy the fully populated structure to the packets array
             packets[packet_count++] = *sp;
             free(sp);
         }
     }
+    // LLM Generated Code Ends
 }
 
 void sniffer(const char *d)
@@ -628,6 +636,7 @@ void sniffer(const char *d)
 
 void sniffer_with_filter(const char *d, const char *filter_exp)
 {
+    // LLM Generated Code Begins
     free_captured_packets();
     handle = pcap_open_live(d, 65536, 1, 100, errbuf);
     if (handle == NULL)
@@ -635,7 +644,6 @@ void sniffer_with_filter(const char *d, const char *filter_exp)
         fprintf(stderr, "[C-Shark] Couldn't open device %s: %s\n", d, errbuf);
         return;
     }
-    // LLM Generated Code Begins
     struct bpf_program fp;
     bpf_u_int32 net, mask;
 
@@ -746,7 +754,7 @@ int main()
         }
     }
     int selected = -1;
-    while (selected < 1 || selected > ind - 1) // While you enter the invalid selection, you can still select an interface (not exiting the program)
+    while (selected < 1 || selected > ind - 1)
     {
         printf("--------------------------------\n");
         printf("[C-Shark] Enter the interface number (1-%d) to capture packets: ", ind - 1);
