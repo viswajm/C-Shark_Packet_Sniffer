@@ -12,6 +12,7 @@ volatile sig_atomic_t stop_sniffing = 0;
 
 void sigint_handler(int sig)
 {
+    (void)sig; // Suppress unused parameter warning
     printf("\n[C-Shark] Caught Ctrl+C - packet sniffing stopped ...\n");
     stop_sniffing = 1;
     pcap_breakloop(handle);
@@ -52,15 +53,15 @@ void print_ipv4_layer(const unsigned char *packet, uint32_t caplen, uint32_t off
 {
     printf("L3 (IPV4):\n");
 
-    if (caplen < off + sizeof(struct ipv4_hdr))
+    if (caplen < off + sizeof(struct iphdr))
     {
         printf("Truncated IPV4\n");
         return;
     }
 
-    const struct ipv4_hdr *ip = (const struct ipv4_hdr *)(packet + off);
-    uint8_t version = (ip->ver_ihl >> 4);
-    uint8_t ihl = (ip->ver_ihl & 0x0F);
+    const struct iphdr *ip = (const struct iphdr *)(packet + off);
+    uint8_t version = (ip->version);
+    uint8_t ihl = (ip->ihl);
     uint16_t iphdr_length = ihl * 4;
     uint16_t frag_field = ntohs(ip->frag_off);
     uint8_t flags = (frag_field & 0xE000) >> 13;
@@ -83,8 +84,8 @@ void print_ipv4_layer(const unsigned char *packet, uint32_t caplen, uint32_t off
 
     uint16_t ip_totlen = ntohs(ip->tot_len);
     char srcbuff[INET_ADDRSTRLEN], dstbuff[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &ip->src, srcbuff, sizeof(srcbuff));
-    inet_ntop(AF_INET, &ip->dst, dstbuff, sizeof(dstbuff));
+    inet_ntop(AF_INET, &ip->saddr, srcbuff, sizeof(srcbuff));
+    inet_ntop(AF_INET, &ip->daddr, dstbuff, sizeof(dstbuff));
     const char *proto;
     if (ip->protocol == IPPROTO_TCP)
     {
@@ -104,7 +105,7 @@ void print_ipv4_layer(const unsigned char *packet, uint32_t caplen, uint32_t off
     }
 
     printf("Src IP: %s | Dst IP: %s | Protocol: %s (%u)\n", srcbuff, dstbuff, proto, ip->protocol);
-    printf("Packet ID: 0x%04x | Header Length: %u bytes | Total Length: %u\n", ip->id, iphdr_length, ip_totlen);
+    printf("Packet ID: 0x%04x | Header Length: %u bytes | Total Length: %u\n", ntohs(ip->id), iphdr_length, ip_totlen);
     printf("Flags: [");
     if (df_flag)
     {
@@ -138,14 +139,14 @@ void print_ipv6_layer(const unsigned char *packet, uint32_t caplen, uint32_t off
 {
     printf("L3 (IPV6):\n");
 
-    if (caplen < off + sizeof(struct ipv6_hdr))
+    if (caplen < off + sizeof(struct ip6_hdr))
     {
         printf("Truncated IPV6\n");
         return;
     }
 
-    const struct ipv6_hdr *ip6 = (const struct ipv6_hdr *)(packet + off);
-    uint8_t version = (ntohl(ip6->ver_tc_flow) >> 28);
+    const struct ip6_hdr *ip6 = (const struct ip6_hdr *)(packet + off);
+    uint8_t version = (ntohl(ip6->ip6_flow) >> 28);
     if (version != 6)
     {
         printf("Not IPv6 (ver=%u)\n", version);
@@ -153,19 +154,19 @@ void print_ipv6_layer(const unsigned char *packet, uint32_t caplen, uint32_t off
     }
 
     char srcbuff[INET6_ADDRSTRLEN], dstbuff[INET6_ADDRSTRLEN];
-    inet_ntop(AF_INET6, ip6->src, srcbuff, sizeof(srcbuff));
-    inet_ntop(AF_INET6, ip6->dst, dstbuff, sizeof(dstbuff));
+    inet_ntop(AF_INET6, &ip6->ip6_src, srcbuff, sizeof(srcbuff));
+    inet_ntop(AF_INET6, &ip6->ip6_dst, dstbuff, sizeof(dstbuff));
 
     const char *proto;
-    if (ip6->next_header == IPPROTO_TCP)
+    if (ip6->ip6_nxt == IPPROTO_TCP)
     {
         proto = "TCP";
     }
-    else if (ip6->next_header == IPPROTO_UDP)
+    else if (ip6->ip6_nxt == IPPROTO_UDP)
     {
         proto = "UDP";
     }
-    else if (ip6->next_header == IPPROTO_ICMP)
+    else if (ip6->ip6_nxt == IPPROTO_ICMP)
     {
         proto = "ICMP";
     }
@@ -174,28 +175,28 @@ void print_ipv6_layer(const unsigned char *packet, uint32_t caplen, uint32_t off
         proto = "Unknown";
     }
 
-    printf("Src IP: %s | Dst IP: %s | Next Header: %s (%u)\n", srcbuff, dstbuff, proto, ip6->next_header);
-    printf("Payload Length: %u bytes | Hop Limit: %u\n", ntohs(ip6->payload_len), ip6->hop_limit);
+    printf("Src IP: %s | Dst IP: %s | Next Header: %s (%u)\n", srcbuff, dstbuff, proto, ip6->ip6_nxt);
+    printf("Payload Length: %u bytes | Hop Limit: %u\n", ntohs(ip6->ip6_plen), ip6->ip6_hlim);
 
-    uint8_t traffic_class = (ntohl(ip6->ver_tc_flow) & 0x0FF00000) >> 20;
-    uint32_t flow_label = (ntohl(ip6->ver_tc_flow) & 0x000FFFFF);
+    uint8_t traffic_class = (ntohl(ip6->ip6_flow) & 0x0FF00000) >> 20;
+    uint32_t flow_label = (ntohl(ip6->ip6_flow) & 0x000FFFFF);
     printf("Traffic Class: %u | Flow Label: 0x%05x\n", traffic_class, flow_label);
     printf("\n");
     int flag = 0;
 
-    if (ip6->next_header == IPPROTO_TCP)
+    if (ip6->ip6_nxt == IPPROTO_TCP)
     {
         flag = 1;
-        print_tcp_layer(packet, caplen, off + sizeof(struct ipv6_hdr));
+        print_tcp_layer(packet, caplen, off + sizeof(struct ip6_hdr));
     }
-    else if (ip6->next_header == IPPROTO_UDP)
+    else if (ip6->ip6_nxt == IPPROTO_UDP)
     {
         flag = 1;
-        print_udp_layer(packet, caplen, off + sizeof(struct ipv6_hdr));
+        print_udp_layer(packet, caplen, off + sizeof(struct ip6_hdr));
     }
-    if (ip6->payload_len > 0 && flag == 0)
+    if (ntohs(ip6->ip6_plen) > 0 && flag == 0)
     {
-        print_payload(packet + off + sizeof(struct ipv6_hdr), ntohs(ip6->payload_len));
+        print_payload(packet + off + sizeof(struct ip6_hdr), ntohs(ip6->ip6_plen));
     }
 }
 
@@ -203,15 +204,15 @@ void print_arp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
 {
     printf("L3 (ARP):\n");
 
-    if (caplen < off + sizeof(struct arp_hdr))
+    if (caplen < off + sizeof(struct ether_arp))
     {
         printf("Truncated ARP\n");
         return;
     }
 
-    const struct arp_hdr *arp = (const struct arp_hdr *)(packet + off);
+    const struct ether_arp *arp = (const struct ether_arp *)(packet + off);
     printf("Operation: ");
-    uint16_t oper = ntohs(arp->oper);
+    uint16_t oper = ntohs(arp->arp_op);
 
     if (oper == ARPOP_REQUEST)
         printf("Request (1)\n");
@@ -221,15 +222,15 @@ void print_arp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
         printf("Unknown (%u)\n", oper);
 
     printf("Sender MAC: %02x:%02x:%02x:%02x:%02x:%02x | ",
-           arp->sha[0], arp->sha[1], arp->sha[2], arp->sha[3], arp->sha[4], arp->sha[5]);
+           arp->arp_sha[0], arp->arp_sha[1], arp->arp_sha[2], arp->arp_sha[3], arp->arp_sha[4], arp->arp_sha[5]);
     printf("Target MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
-           arp->tha[0], arp->tha[1], arp->tha[2], arp->tha[3], arp->tha[4], arp->tha[5]);
+           arp->arp_tha[0], arp->arp_tha[1], arp->arp_tha[2], arp->arp_tha[3], arp->arp_tha[4], arp->arp_tha[5]);
     printf("Sender IP: %d.%d.%d.%d | ",
-           arp->spa[0], arp->spa[1], arp->spa[2], arp->spa[3]);
+           arp->arp_spa[0], arp->arp_spa[1], arp->arp_spa[2], arp->arp_spa[3]);
     printf("Target IP: %d.%d.%d.%d\n",
-           arp->tpa[0], arp->tpa[1], arp->tpa[2], arp->tpa[3]);
+           arp->arp_tpa[0], arp->arp_tpa[1], arp->arp_tpa[2], arp->arp_tpa[3]);
     printf("HW Type: %u | Protocol Type: 0x%04x | HW Length: %u | Protocol Length: %u\n",
-           ntohs(arp->htype), ntohs(arp->ptype), arp->hlen, arp->plen);
+           ntohs(arp->arp_hrd), ntohs(arp->arp_pro), arp->arp_hln, arp->arp_pln);
     printf("\n");
 }
 
@@ -237,21 +238,20 @@ void print_tcp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
 {
     printf("\nL4 (TCP):\n");
 
-    if (caplen < off + sizeof(struct tcp_hdr))
+    if (caplen < off + sizeof(struct tcphdr))
     {
         printf("Truncated TCP\n");
         return;
     }
-    const struct tcp_hdr *tcp = (const struct tcp_hdr *)(packet + off);
-    uint16_t src_port = ntohs(tcp->src_port);
-    uint16_t dst_port = ntohs(tcp->dst_port);
+    const struct tcphdr *tcp = (const struct tcphdr *)(packet + off);
+    uint16_t src_port = ntohs(tcp->source);
+    uint16_t dst_port = ntohs(tcp->dest);
     uint32_t seq = ntohl(tcp->seq);
-    uint32_t ack = ntohl(tcp->ack);
-    uint8_t offset = (tcp->offset_reserved >> 4) * 4; // Data offset in bytes
-    uint8_t flags = tcp->flags;
-    uint16_t win = ntohs(tcp->win);
-    uint16_t checksum = ntohs(tcp->checksum);
-    uint16_t urg_ptr = ntohs(tcp->urg_ptr);
+    uint32_t ack = ntohl(tcp->ack_seq);
+    uint8_t offset = tcp->doff * 4; // Data offset in bytes
+    uint16_t win = ntohs(tcp->window);
+    uint16_t checksum = ntohs(tcp->check);
+    // Note: urg_ptr is available but not displayed in summary
     char *application = "Unknown";
     if (dst_port == 80 || src_port == 80)
         application = "HTTP";
@@ -270,24 +270,19 @@ void print_tcp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
     printf("Window Size: %u | Checksum: 0x%04x | ", win, checksum);
     printf("TCP Header Length: %u bytes\n", offset);
     printf("Flags: [");
-    if (flags & TH_FIN)
+    if (tcp->fin)
         printf("FIN ");
-    if (flags & TH_SYN)
+    if (tcp->syn)
         printf("SYN ");
-    if (flags & TH_RST)
+    if (tcp->rst)
         printf("RST ");
-    if (flags & TH_PUSH)
+    if (tcp->psh)
         printf("PUSH ");
-    if (flags & TH_ACK)
+    if (tcp->ack)
         printf("ACK ");
-    if (flags & TH_URG)
+    if (tcp->urg)
         printf("URG ");
-    if (flags & TH_ECE)
-        printf("ECE ");
-    if (flags & TH_CWR)
-        printf("CWR ");
-    if (flags & TH_NS)
-        printf("NS ");
+    // ECE, CWR, NS flags - these may not be in all tcphdr definitions
     printf("]\n");
     printf("\n");
 
@@ -295,7 +290,7 @@ void print_tcp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
     int payload_offset = off + tcp_header_len;
     int payload_len = caplen - payload_offset;
 
-    if (payload_offset > caplen)
+    if ((uint32_t)payload_offset > caplen)
     {
         printf("Warning: TCP payload offset (%d) > caplen (%d)\n", payload_offset, caplen);
         return;
@@ -318,17 +313,17 @@ void print_udp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
 {
     printf("\nL4 (UDP):\n");
 
-    if (caplen < off + sizeof(struct udp_hdr))
+    if (caplen < off + sizeof(struct udphdr))
     {
         printf("Truncated UDP\n");
         return;
     }
 
-    const struct udp_hdr *udp = (const struct udp_hdr *)(packet + off);
-    uint16_t src_port = ntohs(udp->src_port);
-    uint16_t dst_port = ntohs(udp->dst_port);
+    const struct udphdr *udp = (const struct udphdr *)(packet + off);
+    uint16_t src_port = ntohs(udp->source);
+    uint16_t dst_port = ntohs(udp->dest);
     uint16_t len = ntohs(udp->len);
-    uint16_t checksum = ntohs(udp->checksum);
+    uint16_t checksum = ntohs(udp->check);
 
     char *application = "Unknown";
     if (dst_port == 80 || src_port == 80)
@@ -348,10 +343,10 @@ void print_udp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off)
     printf("Length: %u bytes | Checksum: 0x%04x\n", len, checksum);
     printf("\n");
 
-    int payload_offset = off + sizeof(struct udp_hdr);
+    int payload_offset = off + sizeof(struct udphdr);
     int payload_len = caplen - payload_offset;
 
-    if (payload_offset > caplen)
+    if ((uint32_t)payload_offset > caplen)
     {
         printf("Warning: UDP payload offset (%d) > caplen (%d)\n", payload_offset, caplen);
         return;
@@ -408,19 +403,54 @@ void print_payload(const unsigned char *payload, int payload_len)
 
 void print_summariser()
 {
-    printf("\n================ Packet Summary ================\n");
-    printf("Total Packets Captured: %d\n", packet_count);
+    printf("\n");
+    printf("╔════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗\n");
+    printf("║                                                    PACKET SUMMARY - Total Packets: %-4d                                                       ║\n", packet_count);
+    printf("╠═════╦════════════╦═══════════════════════╦═══════════════════════╦════════════════════════════════════╦════════════════════════════════════╦═══════════╣\n");
+    printf("║ No. ║   Length   ║      Timestamp        ║      Src MAC          ║            Src IP                  ║            Dst IP                  ║   Ports   ║\n");
+    printf("╠═════╬════════════╬═══════════════════════╬═══════════════════════╬════════════════════════════════════╬════════════════════════════════════╬═══════════╣\n");
+    
     for (int i = 0; i < packet_count; i++)
     {
         const struct pcap_pkthdr *header = &packets[i].header;
-        const unsigned char *packet = packets[i].data;
-        printf("%d. Length: %u bytes | Timestamp: %ld.%06ld\n", i + 1, header->caplen, header->ts.tv_sec, header->ts.tv_usec);
-        printf("   Src MAC: %02x:%02x:%02x:%02x:%02x:%02x | Dst MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
-               packets[i].src_mac[0], packets[i].src_mac[1], packets[i].src_mac[2], packets[i].src_mac[3], packets[i].src_mac[4], packets[i].src_mac[5],
-               packets[i].dst_mac[0], packets[i].dst_mac[1], packets[i].dst_mac[2], packets[i].dst_mac[3], packets[i].dst_mac[4], packets[i].dst_mac[5]);
-        printf("Src port->Dst port: %u->%u | ", packets[i].src_port, packets[i].dst_port);
+        
+        // Format MAC address
+        char src_mac_str[18];
+        snprintf(src_mac_str, sizeof(src_mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+                 packets[i].src_mac[0], packets[i].src_mac[1], packets[i].src_mac[2],
+                 packets[i].src_mac[3], packets[i].src_mac[4], packets[i].src_mac[5]);
+        
+        // Format timestamp
+        char timestamp_str[22];
+        snprintf(timestamp_str, sizeof(timestamp_str), "%ld.%06ld", header->ts.tv_sec, header->ts.tv_usec);
+        
+        // Format ports
+        char ports_str[16];  // Increased size to avoid truncation warning
+        if (packets[i].src_port != 0 || packets[i].dst_port != 0)
+        {
+            snprintf(ports_str, sizeof(ports_str), "%u->%u", packets[i].src_port, packets[i].dst_port);
+        }
+        else
+        {
+            snprintf(ports_str, sizeof(ports_str), "N/A");
+        }
+        
+        // Format IP addresses (handle empty strings)
+        const char *src_ip_display = (packets[i].src_ip[0] != '\0') ? packets[i].src_ip : "N/A";
+        const char *dst_ip_display = (packets[i].dst_ip[0] != '\0') ? packets[i].dst_ip : "N/A";
+        
+        printf("║ %-3d ║ %-8u B ║ %-21s ║ %-21s ║ %-34s ║ %-34s ║ %-9s ║\n",
+               i + 1,
+               header->caplen,
+               timestamp_str,
+               src_mac_str,
+               src_ip_display,
+               dst_ip_display,
+               ports_str);
     }
-    printf("===============================================\n");
+    
+    printf("╚═════╩════════════╩═══════════════════════╩═══════════════════════╩════════════════════════════════════╩════════════════════════════════════╩═══════════╝\n");
+    printf("\n");
 }
 
 void hex_dump(const unsigned char *data, int len)
@@ -452,13 +482,13 @@ void hex_dump(const unsigned char *data, int len)
 
 void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const unsigned char *packet)
 {
-    const unsigned char *ptr = packet;
+    (void)user; // Suppress unused parameter warning
     uint32_t caplen = header->caplen;
 
-    if (caplen < sizeof(struct eth_hdr))
+    if (caplen < sizeof(struct ether_header))
         return;
 
-    uint32_t off = sizeof(struct eth_hdr);
+    uint32_t off = sizeof(struct ether_header);
     printf("\n===========================================\n");
     printf("Packet #%d\n", packet_id++);
     printf("Timestamp: %ld.%06ld | Length: %u bytes\n", header->ts.tv_sec, header->ts.tv_usec, header->caplen);
@@ -502,7 +532,7 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
             sp->data = malloc(header->caplen);
             if (sp->data)
             {
-                memcpy(sp->data, packet, header->caplen);
+                memcpy((unsigned char *)sp->data, packet, header->caplen);
             }
             sp->src_mac[0] = packet[6];
             sp->src_mac[1] = packet[7];
@@ -528,40 +558,40 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
             
             if (eth_type == ETHER_TYPE_IPv4)
             {
-                const struct ipv4_hdr *ip = (const struct ipv4_hdr *)(packet + off);
-                inet_ntop(AF_INET, &ip->src, sp->src_ip, sizeof(sp->src_ip));
-                inet_ntop(AF_INET, &ip->dst, sp->dst_ip, sizeof(sp->dst_ip));
+                const struct iphdr *ip = (const struct iphdr *)(packet + off);
+                inet_ntop(AF_INET, &ip->saddr, sp->src_ip, sizeof(sp->src_ip));
+                inet_ntop(AF_INET, &ip->daddr, sp->dst_ip, sizeof(sp->dst_ip));
                 sp->protocol = ip->protocol;
                 if (ip->protocol == IPPROTO_TCP)
                 {
-                    const struct tcp_hdr *tcp = (const struct tcp_hdr *)(packet + off + ((ip->ver_ihl & 0x0F) * 4));
-                    sp->src_port = ntohs(tcp->src_port);
-                    sp->dst_port = ntohs(tcp->dst_port);
+                    const struct tcphdr *tcp = (const struct tcphdr *)(packet + off + (ip->ihl * 4));
+                    sp->src_port = ntohs(tcp->source);
+                    sp->dst_port = ntohs(tcp->dest);
                 }
                 else if (ip->protocol == IPPROTO_UDP)
                 {
-                    const struct udp_hdr *udp = (const struct udp_hdr *)(packet + off + ((ip->ver_ihl & 0x0F) * 4));
-                    sp->src_port = ntohs(udp->src_port);
-                    sp->dst_port = ntohs(udp->dst_port);
+                    const struct udphdr *udp = (const struct udphdr *)(packet + off + (ip->ihl * 4));
+                    sp->src_port = ntohs(udp->source);
+                    sp->dst_port = ntohs(udp->dest);
                 }
             }
             else if (eth_type == ETHER_TYPE_IPV6)
             {
-                const struct ipv6_hdr *ip6 = (const struct ipv6_hdr *)(packet + off);
-                inet_ntop(AF_INET6, ip6->src, sp->src_ip, sizeof(sp->src_ip));
-                inet_ntop(AF_INET6, ip6->dst, sp->dst_ip, sizeof(sp->dst_ip));
-                sp->protocol = ip6->next_header;
-                if (ip6->next_header == IPPROTO_TCP)
+                const struct ip6_hdr *ip6 = (const struct ip6_hdr *)(packet + off);
+                inet_ntop(AF_INET6, &ip6->ip6_src, sp->src_ip, sizeof(sp->src_ip));
+                inet_ntop(AF_INET6, &ip6->ip6_dst, sp->dst_ip, sizeof(sp->dst_ip));
+                sp->protocol = ip6->ip6_nxt;
+                if (ip6->ip6_nxt == IPPROTO_TCP)
                 {
-                    const struct tcp_hdr *tcp = (const struct tcp_hdr *)(packet + off + sizeof(struct ipv6_hdr));
-                    sp->src_port = ntohs(tcp->src_port);
-                    sp->dst_port = ntohs(tcp->dst_port);
+                    const struct tcphdr *tcp = (const struct tcphdr *)(packet + off + sizeof(struct ip6_hdr));
+                    sp->src_port = ntohs(tcp->source);
+                    sp->dst_port = ntohs(tcp->dest);
                 }
-                else if (ip6->next_header == IPPROTO_UDP)
+                else if (ip6->ip6_nxt == IPPROTO_UDP)
                 {
-                    const struct udp_hdr *udp = (const struct udp_hdr *)(packet + off + sizeof(struct ipv6_hdr));
-                    sp->src_port = ntohs(udp->src_port);
-                    sp->dst_port = ntohs(udp->dst_port);
+                    const struct udphdr *udp = (const struct udphdr *)(packet + off + sizeof(struct ip6_hdr));
+                    sp->src_port = ntohs(udp->source);
+                    sp->dst_port = ntohs(udp->dest);
                 }
             }
             
@@ -592,6 +622,7 @@ void sniffer(const char *d)
     {
         printf("[C-Shark] Ctrl+C pressed. Returning to Main Menu...\n");
         stop_sniffing = 0;
+        packet_id = 1;
     }
 }
 
@@ -642,6 +673,7 @@ void sniffer_with_filter(const char *d, const char *filter_exp)
     {
         printf("[C-Shark] Ctrl+C pressed. Returning to Main Menu...\n");
         stop_sniffing = 0;
+        packet_id = 1;
     }
     // LLM Generated Code Ends
 }
@@ -652,7 +684,7 @@ void free_captured_packets()
     {
         if (packets[i].data)
         {
-            free(packets[i].data);
+            free((void *)packets[i].data);
             packets[i].data = NULL;
         }
     }
@@ -671,7 +703,7 @@ void inspect_packet(packet_store *sp)
     print_ethernet_layer(packet);
 
     unsigned short eth_type = (packet[12] << 8) | packet[13];
-    uint32_t off = sizeof(struct eth_hdr);
+    uint32_t off = sizeof(struct ether_header);
 
     if (eth_type == ETHER_TYPE_IPv4)
         print_ipv4_layer(packet, caplen, off);
@@ -777,7 +809,7 @@ int main()
             while (filter_choice < 1 || filter_choice > 6)
             {
                 printf("1. HTTP\n2. HTTPS\n3. DNS\n4. ARP\n5. TCP\n6. UDP\n");
-                printf("[C-Shark] Select the filter for precision hunting:\n");
+                printf("[C-Shark] Select the filter for precision hunting: ");
 
                 if (scanf("%d", &filter_choice) != 1)
                 {
