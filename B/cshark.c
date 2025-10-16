@@ -503,7 +503,6 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
             if (sp->data)
             {
                 memcpy(sp->data, packet, header->caplen);
-                packets[packet_count++] = *sp;
             }
             sp->src_mac[0] = packet[6];
             sp->src_mac[1] = packet[7];
@@ -519,6 +518,14 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
             sp->dst_mac[5] = packet[5];
             sp->timestamp = header->ts;
             sp->length = header->caplen;
+            
+            // Initialize IP addresses to empty strings
+            sp->src_ip[0] = '\0';
+            sp->dst_ip[0] = '\0';
+            sp->protocol = 0;
+            sp->src_port = 0;
+            sp->dst_port = 0;
+            
             if (eth_type == ETHER_TYPE_IPv4)
             {
                 const struct ipv4_hdr *ip = (const struct ipv4_hdr *)(packet + off);
@@ -557,14 +564,9 @@ void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const
                     sp->dst_port = ntohs(udp->dst_port);
                 }
             }
-            else
-            {
-                sp->src_port = 0;
-                sp->dst_port = 0;
-            }
-        }
-        else
-        {
+            
+            // Copy the fully populated structure to the packets array
+            packets[packet_count++] = *sp;
             free(sp);
         }
     }
