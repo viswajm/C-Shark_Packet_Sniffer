@@ -1,4 +1,4 @@
-#include "cshark.h"
+#include "../include/cshark.h"
 
 pcap_if_t *alldevices, *device;
 char errbuf[PCAP_ERRBUF_SIZE];
