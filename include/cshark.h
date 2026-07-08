@@ -66,15 +66,26 @@ typedef struct
 #endif
 
 
+// Live sniffing output functions
 void print_ethernet_layer(const unsigned char *packet);
 void print_ipv4_layer(const unsigned char *packet, uint32_t caplen, uint32_t off);
 void print_ipv6_layer(const unsigned char *packet, uint32_t caplen, uint32_t off);
 void print_arp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off);
 void print_tcp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off);
 void print_udp_layer(const unsigned char *packet, uint32_t caplen, uint32_t off);
-void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const unsigned char *packet);
 void print_payload(const unsigned char *payload, int payload_len);
-void hex_dump(const unsigned char *data, int len);
+void packet_handler(unsigned char *user, const struct pcap_pkthdr *header, const unsigned char *packet);
+
+// Deep/inspection analysis functions
+void deep_ethernet(const unsigned char *packet);
+void deep_ipv4(const unsigned char *packet, uint32_t caplen, uint32_t off);
+void deep_ipv6(const unsigned char *packet, uint32_t caplen, uint32_t off);
+void deep_arp(const unsigned char *packet, uint32_t caplen, uint32_t off);
+void deep_tcp(const unsigned char *packet, uint32_t caplen, uint32_t off);
+void deep_udp(const unsigned char *packet, uint32_t caplen, uint32_t off);
+void deep_payload(const unsigned char *payload, int len, const char *app_name);
+void deep_hex_dump(const unsigned char *data, int len);
+
 void inspect_packet(packet_store *sp);
 void sniffer(const char *d);
 void sniffer_with_filter(const char *d, const char *filter_exp);
